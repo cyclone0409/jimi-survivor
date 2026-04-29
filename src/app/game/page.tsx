@@ -429,6 +429,11 @@ function musicTrackForTier(tier: number): MusicTrack {
   return tier >= 4 ? "bgm4" : tier >= 3 ? "bgm3" : tier >= 2 ? "bgm2" : "bgm1";
 }
 
+function cameraAnchorY(height: number) {
+  if (typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches) return height * 0.64;
+  return height / 2;
+}
+
 function isEnemyInView(game: Game, enemy: Enemy) {
   const padding = enemy.renderSize * 0.5;
   return (
@@ -626,11 +631,12 @@ export default function GamePage() {
     game.player.x = clamp(game.player.x, game.player.hitbox, game.worldWidth - game.player.hitbox);
     game.player.y = clamp(game.player.y, game.player.hitbox, game.worldHeight - game.player.hitbox);
     game.cameraX = clamp(game.player.x - game.width / 2, 0, Math.max(0, game.worldWidth - game.width));
-    game.cameraY = clamp(game.player.y - game.height / 2, 0, Math.max(0, game.worldHeight - game.height));
+    game.cameraY = clamp(game.player.y - cameraAnchorY(game.height), 0, Math.max(0, game.worldHeight - game.height));
   }, []);
 
   const switchMusic = useCallback((track: MusicTrack) => {
     const audio = audioRef.current;
+    if (gameRef.current.phase === "gameover") return;
     if (audio.currentTrack === track) return;
     if (audio.haoBgmActive) {
       audio.pausedTrack = track;
@@ -686,6 +692,7 @@ export default function GamePage() {
         next.currentTime = 0;
         next.volume = 0;
         audio.currentTrack = previousTrack;
+        if (gameRef.current.phase === "gameover") return;
         const index = MUSIC_ORDER.indexOf(track);
         const fallbackTrack = MUSIC_ORDER[(index + 1) % MUSIC_ORDER.length] || "bgm1";
         if (fallbackTrack !== track) window.setTimeout(() => switchMusic(fallbackTrack), 0);
@@ -702,6 +709,7 @@ export default function GamePage() {
     for (const track of Object.values(audio.bgm)) {
       if (!track) continue;
       track.pause();
+      track.currentTime = 0;
       track.volume = 0;
     }
     audio.haoBgmActive = true;
@@ -783,11 +791,12 @@ export default function GamePage() {
 
   const unlockMusic = useCallback(() => {
     const audio = audioRef.current;
-    if (!musicEnabledRef.current || audio.haoBgmActive) return;
+    if (!musicEnabledRef.current || audio.haoBgmActive || gameRef.current.phase === "gameover") return;
     const trackKey = audio.currentTrack || "bgm1";
     const currentAudio = audio.bgm[trackKey];
     if (!currentAudio) return;
     audio.currentTrack = trackKey;
+    if (currentAudio.readyState === HTMLMediaElement.HAVE_NOTHING) currentAudio.load();
     currentAudio.volume = currentAudio.volume || 0.42;
     currentAudio.play().catch(() => undefined);
   }, []);
@@ -1059,7 +1068,7 @@ export default function GamePage() {
       player.x = clamp(player.x + (input.x / len) * player.speed * speedMultiplier * dt, player.hitbox, game.worldWidth - player.hitbox);
       player.y = clamp(player.y + (input.y / len) * player.speed * speedMultiplier * dt, player.hitbox, game.worldHeight - player.hitbox);
       game.cameraX = clamp(player.x - game.width / 2, 0, Math.max(0, game.worldWidth - game.width));
-      game.cameraY = clamp(player.y - game.height / 2, 0, Math.max(0, game.worldHeight - game.height));
+      game.cameraY = clamp(player.y - cameraAnchorY(game.height), 0, Math.max(0, game.worldHeight - game.height));
       player.invincible = Math.max(0, player.invincible - dt);
 
       const plan = getSpawnPlan(game.time);
@@ -1784,12 +1793,16 @@ export default function GamePage() {
     window.addEventListener("keyup", up);
     window.addEventListener("pointerdown", unlockByPointer);
     window.addEventListener("touchstart", unlockByPointer, { passive: true });
+    window.addEventListener("touchend", unlockByPointer);
+    window.addEventListener("click", unlockByPointer);
     return () => {
       window.removeEventListener("resize", resizeCanvas);
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
       window.removeEventListener("pointerdown", unlockByPointer);
       window.removeEventListener("touchstart", unlockByPointer);
+      window.removeEventListener("touchend", unlockByPointer);
+      window.removeEventListener("click", unlockByPointer);
     };
   }, [choices, chooseSkill, resizeCanvas, selectedChoice, togglePause, unlockMusic]);
 
@@ -1846,33 +1859,33 @@ export default function GamePage() {
         </h1>
       </div>
 
-      <section className="pointer-events-none absolute left-0 top-0 z-10 w-full p-2 pt-[max(0.5rem,env(safe-area-inset-top))] sm:p-4">
-        <div className="grid max-w-[min(620px,calc(100vw-1rem))] gap-2 text-[11px] text-cyan-50 sm:grid-cols-[minmax(260px,520px)_auto] sm:items-start">
-          <div className="space-y-1.5 border border-cyan-300/15 bg-slate-950/28 p-2 backdrop-blur-[2px] sm:p-3">
-            <div className="flex items-center gap-3">
-              <span className="min-w-16 text-cyan-200">等级 {hud.level}</span>
+      <section className="pointer-events-none absolute left-0 top-0 z-10 w-full p-2 pt-[max(0.35rem,env(safe-area-inset-top))] sm:p-4">
+        <div className="grid max-w-[calc(100vw-0.75rem)] gap-1.5 text-[10px] text-cyan-50 sm:max-w-[min(620px,calc(100vw-1rem))] sm:grid-cols-[minmax(260px,520px)_auto] sm:items-start sm:text-[11px]">
+          <div className="relative space-y-1 border border-cyan-300/15 bg-slate-950/25 p-1.5 pr-11 backdrop-blur-[2px] sm:space-y-1.5 sm:p-3">
+            <div className="flex items-center gap-1.5 sm:gap-3">
+              <span className="min-w-12 text-cyan-200 sm:min-w-16">等级 {hud.level}</span>
               <div className="h-3 flex-1 border border-cyan-300/50 bg-slate-950/70">
                 <div className="h-full bg-cyan-300 shadow-[0_0_14px_rgba(103,232,249,0.8)]" style={{ width: `${expPercent}%` }} />
               </div>
-              <span className="min-w-20 text-right text-cyan-100">
+              <span className="min-w-14 text-right text-cyan-100 sm:min-w-20">
                 {hud.exp}/{hud.nextExp}
               </span>
             </div>
-            <div className="flex items-center gap-3">
-              <span className="min-w-16 text-yellow-100">豪意</span>
+            <div className="flex items-center gap-1.5 sm:gap-3">
+              <span className="min-w-12 text-yellow-100 sm:min-w-16">豪意</span>
               <div className="h-2.5 flex-1 border border-yellow-200/45 bg-slate-950/60">
                 <div className="h-full bg-yellow-300 shadow-[0_0_14px_rgba(250,204,21,0.75)]" style={{ width: `${haoPercent}%` }} />
               </div>
-              <span className="min-w-20 text-right text-yellow-100">
+              <span className="min-w-14 text-right text-yellow-100 sm:min-w-20">
                 {hud.haoWill}/{hud.haoWillMax}
               </span>
             </div>
-            <div className="flex items-center gap-3">
-              <span className="min-w-16 text-rose-200">生命</span>
+            <div className="flex items-center gap-1.5 sm:gap-3">
+              <span className="min-w-12 text-rose-200 sm:min-w-16">生命</span>
               <div className="h-3 flex-1 border border-rose-300/50 bg-slate-950/70">
                 <div className="h-full bg-rose-400 shadow-[0_0_14px_rgba(251,113,133,0.8)]" style={{ width: `${hpPercent}%` }} />
               </div>
-              <span className="min-w-20 text-right text-rose-100">
+              <span className="min-w-14 text-right text-rose-100 sm:min-w-20">
                 {hud.hp}/{hud.maxHp}
               </span>
             </div>
@@ -1885,17 +1898,17 @@ export default function GamePage() {
                 自在极意豪形态 {gameRef.current.player.haoModeTimer.toFixed(1)}s
               </div>
             )}
-            <div className="pointer-events-auto absolute right-2 top-[max(0.5rem,env(safe-area-inset-top))]">
+            <div className="pointer-events-auto absolute right-1 top-1 sm:right-2 sm:top-[max(0.5rem,env(safe-area-inset-top))]">
               <button
                 type="button"
                 aria-label="设置"
                 onClick={toggleSettings}
-                className="grid h-10 w-10 place-items-center border border-cyan-300/40 bg-slate-950/70 text-lg text-cyan-100 shadow-[0_0_20px_rgba(34,211,238,0.18)] backdrop-blur transition hover:border-yellow-200 hover:text-yellow-100"
+                className="grid h-8 w-8 place-items-center border border-cyan-300/40 bg-slate-950/70 text-base text-cyan-100 shadow-[0_0_20px_rgba(34,211,238,0.18)] backdrop-blur transition hover:border-yellow-200 hover:text-yellow-100 sm:h-10 sm:w-10 sm:text-lg"
               >
                 ⚙
               </button>
               {settingsOpen && (
-                <div className="absolute left-0 top-12 z-30 w-52 border border-cyan-300/35 bg-slate-950/90 p-2 text-sm text-cyan-50 shadow-[0_0_30px_rgba(14,165,233,0.2)] backdrop-blur">
+                <div className="absolute right-0 top-10 z-30 w-44 border border-cyan-300/35 bg-slate-950/90 p-2 text-xs text-cyan-50 shadow-[0_0_30px_rgba(14,165,233,0.2)] backdrop-blur sm:left-0 sm:right-auto sm:top-12 sm:w-52 sm:text-sm">
                   <button
                     type="button"
                     onClick={toggleMusic}
@@ -1915,7 +1928,7 @@ export default function GamePage() {
                     onClick={restart}
                     className="mt-1 block w-full border border-transparent px-3 py-2 text-left text-rose-100 transition hover:border-rose-300/40 hover:bg-rose-300/10"
                   >
-                    三气归来！
+                    从头哈起
                   </button>
                 </div>
               )}
@@ -1930,10 +1943,11 @@ export default function GamePage() {
         </div>
       </section>
 
-      <div className="absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] right-[max(0.75rem,env(safe-area-inset-right))] z-20 h-28 w-28 touch-none select-none landscape:h-32 landscape:w-32 [@media(pointer:fine)]:hidden">
+      <div className="absolute bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 z-20 h-28 w-28 -translate-x-1/2 touch-none select-none sm:h-32 sm:w-32 [@media(pointer:fine)]:hidden">
         <div
           role="presentation"
           onPointerDown={(event) => {
+            unlockMusic();
             event.currentTarget.setPointerCapture(event.pointerId);
             setJoystickActive(true);
             updateJoystick(event);
