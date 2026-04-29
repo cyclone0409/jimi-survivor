@@ -40,6 +40,7 @@ type SpriteAsset = { src: string; image: HTMLImageElement; processed?: HTMLCanva
 type AudioState = {
   bgm: Partial<Record<MusicTrack, HTMLAudioElement>>;
   haoBgm?: HTMLAudioElement;
+  gameoverBgm?: HTMLAudioElement;
   attack?: HTMLAudioElement;
   hit?: HTMLAudioElement;
   context?: AudioContext;
@@ -60,6 +61,8 @@ type Player = Vec & {
   level: number;
   exp: number;
   nextExp: number;
+  haoWill: number;
+  haoWillMax: number;
   bulletSpeed: number;
   bulletDamage: number;
   fireCooldown: number;
@@ -199,6 +202,8 @@ type Hud = {
   level: number;
   exp: number;
   nextExp: number;
+  haoWill: number;
+  haoWillMax: number;
   hp: number;
   maxHp: number;
   kills: number;
@@ -220,10 +225,10 @@ const SPRITE_SOURCES: Record<SpriteKey, string> = {
 };
 
 const AUDIO_SOURCES = {
-  bgm1: ["/audio/bgm-1.wav", "/audio/bgm-1.m4a", "/audio/bgm-1.mp3"],
-  bgm2: ["/audio/bgm-2.wav", "/audio/bgm-2..wav", "/audio/bgm-2.m4a", "/audio/bgm-2.mp3"],
+  bgm1: ["/audio/bgm-1.m4a", "/audio/bgm-1.wav", "/audio/bgm-1.mp3"],
+  bgm2: ["/audio/bgm-2..wav", "/audio/bgm-2.wav", "/audio/bgm-2.m4a", "/audio/bgm-2.mp3"],
   bgm3: ["/audio/bgm-3.wav", "/audio/bgm-3.m4a", "/audio/bgm-3.mp3"],
-  bgm4: ["/audio/bgm-4.wav", "/audio/bgm-4.m4a", "/audio/bgm-4.mp3"],
+  bgm4: ["/audio/bgm-4.m4a", "/audio/bgm-4.wav", "/audio/bgm-4.mp3"],
   bgm5: ["/audio/bgm-5.wav", "/audio/bgm-5.m4a", "/audio/bgm-5.mp3"],
   bgm6: ["/audio/bgm-6.wav", "/audio/bgm-6.m4a", "/audio/bgm-6.mp3"],
   bgm7: ["/audio/bgm-7.wav", "/audio/bgm-7.m4a", "/audio/bgm-7.mp3"],
@@ -231,11 +236,12 @@ const AUDIO_SOURCES = {
   bgm9: ["/audio/bgm-9.wav", "/audio/bgm-9.m4a", "/audio/bgm-9.mp3"],
   bgm10: ["/audio/bgm-10.wav", "/audio/bgm-10.m4a", "/audio/bgm-10.mp3"],
   haoBgm: ["/audio/hao-bgm.wav", "/audio/hao-bgm.m4a", "/audio/hao-bgm.mp3"],
+  gameoverBgm: ["/audio/gameover-bgm.m4a", "/audio/gameover-bgm.wav", "/audio/gameover-bgm.mp3"],
   attack: "/audio/attack.wav",
   hit: "/audio/hit.wav"
 };
 
-const MUSIC_ORDER: MusicTrack[] = ["bgm1", "bgm2", "bgm3", "bgm4", "bgm5", "bgm6", "bgm7", "bgm8", "bgm9", "bgm10"];
+const MUSIC_ORDER: MusicTrack[] = ["bgm1", "bgm2", "bgm3", "bgm4"];
 
 const SKILLS: Skill[] = [
   { key: "bulletSpeed", title: "快点乐啊", desc: "子弹速度提高，更快命中远处敌人。", maxLevel: 5 },
@@ -259,6 +265,8 @@ const initialHud: Hud = {
   level: 1,
   exp: 0,
   nextExp: 7,
+  haoWill: 0,
+  haoWillMax: 100,
   hp: 120,
   maxHp: 120,
   kills: 0,
@@ -298,6 +306,8 @@ function createGame(width = 960, height = 540): Game {
       level: 1,
       exp: 0,
       nextExp: 7,
+      haoWill: 0,
+      haoWillMax: 100,
       bulletSpeed: 620,
       bulletDamage: 16,
       fireCooldown: 0.43,
@@ -593,6 +603,8 @@ export default function GamePage() {
       level: game.player.level,
       exp: Math.floor(game.player.exp),
       nextExp: game.player.nextExp,
+      haoWill: Math.floor(game.player.haoWill),
+      haoWillMax: game.player.haoWillMax,
       hp: Math.ceil(game.player.hp),
       maxHp: game.player.maxHp,
       kills: game.kills,
@@ -670,14 +682,13 @@ export default function GamePage() {
       .play()
       .then(fadeToNext)
       .catch(() => {
-        audio.currentTrack = track;
-        next.volume = 0.42;
-        if (previous) {
-          previous.currentTime = 0;
-          previous.volume = 0.42;
-          previous.play().catch(() => undefined);
-          audio.currentTrack = previousTrack;
-        }
+        next.pause();
+        next.currentTime = 0;
+        next.volume = 0;
+        audio.currentTrack = previousTrack;
+        const index = MUSIC_ORDER.indexOf(track);
+        const fallbackTrack = MUSIC_ORDER[(index + 1) % MUSIC_ORDER.length] || "bgm1";
+        if (fallbackTrack !== track) window.setTimeout(() => switchMusic(fallbackTrack), 0);
       });
   }, []);
 
@@ -739,8 +750,35 @@ export default function GamePage() {
       audio.haoBgm.pause();
       audio.haoBgm.volume = 0;
     }
+    if (audio.gameoverBgm) {
+      audio.gameoverBgm.pause();
+      audio.gameoverBgm.currentTime = 0;
+      audio.gameoverBgm.volume = 0;
+    }
     audio.haoBgmActive = false;
     audio.currentTrack = undefined;
+  }, []);
+
+  const startGameoverMusic = useCallback(() => {
+    const audio = audioRef.current;
+    for (const timer of audio.fadeTimers) window.clearInterval(timer);
+    audio.fadeTimers = [];
+    for (const track of Object.values(audio.bgm)) {
+      if (!track) continue;
+      track.pause();
+      track.volume = 0;
+    }
+    if (audio.haoBgm) {
+      audio.haoBgmTime = Number.isFinite(audio.haoBgm.currentTime) ? audio.haoBgm.currentTime : audio.haoBgmTime;
+      audio.haoBgm.pause();
+      audio.haoBgm.volume = 0;
+    }
+    audio.haoBgmActive = false;
+    audio.currentTrack = undefined;
+    if (!musicEnabledRef.current || !audio.gameoverBgm) return;
+    audio.gameoverBgm.currentTime = 0;
+    audio.gameoverBgm.volume = 0.5;
+    audio.gameoverBgm.play().catch(() => undefined);
   }, []);
 
   const unlockMusic = useCallback(() => {
@@ -840,6 +878,11 @@ export default function GamePage() {
   const activateHaoMode = useCallback(
     (game: Game) => {
       const player = game.player;
+      if (player.haoModeActive) {
+        player.haoModeTimer = Math.max(player.haoModeTimer, player.haoModeDuration);
+        return;
+      }
+      player.haoWill = 0;
       player.haoModeActive = true;
       player.haoModeTimer = player.haoModeDuration;
       startHaoMusic();
@@ -879,6 +922,17 @@ export default function GamePage() {
     });
     addDamageText(game, x, y - 58, "豪字补给出现！", "#fef08a");
   }, [addDamageText]);
+
+  const gainHaoWill = useCallback(
+    (game: Game, enemy: Enemy) => {
+      const player = game.player;
+      if (player.haoModeActive) return;
+      const gain = enemy.type === "tank" ? 18 : enemy.type === "shooter" ? 15 : enemy.type === "fast" ? 10 : 8;
+      player.haoWill = clamp(player.haoWill + gain, 0, player.haoWillMax);
+      if (player.haoWill >= player.haoWillMax) activateHaoMode(game);
+    },
+    [activateHaoMode]
+  );
 
   const spawnEnemy = useCallback((game: Game) => {
     const plan = getSpawnPlan(game.time);
@@ -1018,12 +1072,6 @@ export default function GamePage() {
         game.enemyTimer = game.enemyEvery;
       }
 
-      game.haoPickupTimer -= dt;
-      if (game.haoPickupTimer <= 0) {
-        spawnHaoPickup(game);
-        game.haoPickupTimer = game.haoPickupEvery;
-      }
-
       player.fireTimer -= dt;
       if (player.fireTimer <= 0) {
         fireBullets(game);
@@ -1071,7 +1119,7 @@ export default function GamePage() {
           addDamageText(game, player.x, player.y - 18, `-${enemy.contactDamage}`, "#fca5a5");
           if (player.hp <= 0) {
             game.phase = "gameover";
-            stopMusic();
+            startGameoverMusic();
           }
         }
       }
@@ -1095,7 +1143,7 @@ export default function GamePage() {
           addDamageText(game, player.x, player.y - 18, `-${bullet.damage}`, "#fca5a5");
           if (player.hp <= 0) {
             game.phase = "gameover";
-            stopMusic();
+            startGameoverMusic();
           }
         }
       }
@@ -1159,6 +1207,7 @@ export default function GamePage() {
               deadEnemyIds.add(enemy.id);
               rewardedEnemyIds.add(enemy.id);
               game.kills += 1;
+              gainHaoWill(game, enemy);
               game.orbs.push({
                 id: game.id++,
                 x: enemy.x,
@@ -1178,6 +1227,7 @@ export default function GamePage() {
         if (!deadEnemyIds.has(enemy.id) || rewardedEnemyIds.has(enemy.id)) continue;
         rewardedEnemyIds.add(enemy.id);
         game.kills += 1;
+        gainHaoWill(game, enemy);
         game.orbs.push({
           id: game.id++,
           x: enemy.x,
@@ -1230,16 +1280,6 @@ export default function GamePage() {
       }
       game.orbs = game.orbs.filter((orb) => !collectedOrbs.has(orb.id));
 
-      const pickedHaoIds = new Set<number>();
-      for (const pickup of game.haoPickups) {
-        pickup.life -= dt;
-        if (distSq(pickup, player) < (pickup.hitbox + player.hitbox) ** 2) {
-          pickedHaoIds.add(pickup.id);
-          activateHaoMode(game);
-        }
-      }
-      game.haoPickups = game.haoPickups.filter((pickup) => pickup.life > 0 && !pickedHaoIds.has(pickup.id));
-
       for (const shockwave of game.shockwaves) {
         shockwave.life -= dt;
         const progress = 1 - shockwave.life / shockwave.maxLife;
@@ -1268,6 +1308,7 @@ export default function GamePage() {
         for (const enemy of game.enemies) {
           if (!shockwaveDeadIds.has(enemy.id)) continue;
           game.kills += 1;
+          gainHaoWill(game, enemy);
           game.orbs.push({
             id: game.id++,
             x: enemy.x,
@@ -1297,7 +1338,7 @@ export default function GamePage() {
       }
       game.damageTexts = game.damageTexts.filter((text) => text.life > 0);
     },
-    [activateHaoMode, addDamageText, addParticles, fireBullets, gainExp, playHitSound, spawnEnemy, spawnHaoPickup, stopHaoMusic, stopMusic]
+    [addDamageText, addParticles, fireBullets, gainExp, gainHaoWill, playHitSound, spawnEnemy, startGameoverMusic, stopHaoMusic, stopMusic]
   );
 
   const draw = useCallback(() => {
@@ -1585,7 +1626,15 @@ export default function GamePage() {
           audio.haoBgm.pause();
         }
       }
+      if (audio.gameoverBgm) {
+        audio.gameoverBgm.muted = !nextEnabled;
+        if (!nextEnabled) audio.gameoverBgm.pause();
+      }
       if (nextEnabled) {
+        if (gameRef.current.phase === "gameover") {
+          audio.gameoverBgm?.play().catch(() => undefined);
+          return nextEnabled;
+        }
         if (audio.haoBgmActive) {
           audio.haoBgm?.play().catch(() => undefined);
           return nextEnabled;
@@ -1647,6 +1696,7 @@ export default function GamePage() {
       MUSIC_ORDER.map((track) => [track, createAudioWithFallback(AUDIO_SOURCES[track])])
     ) as Record<MusicTrack, HTMLAudioElement>;
     const haoBgm = createAudioWithFallback(AUDIO_SOURCES.haoBgm);
+    const gameoverBgm = createAudioWithFallback(AUDIO_SOURCES.gameoverBgm);
     const attack = new Audio(AUDIO_SOURCES.attack);
     const hit = new Audio(AUDIO_SOURCES.hit);
     MUSIC_ORDER.forEach((trackKey, index) => {
@@ -1665,10 +1715,15 @@ export default function GamePage() {
     haoBgm.preload = "auto";
     haoBgm.volume = 0.48;
     haoBgm.muted = !musicEnabledRef.current;
+    gameoverBgm.loop = true;
+    gameoverBgm.preload = "auto";
+    gameoverBgm.volume = 0;
+    gameoverBgm.muted = !musicEnabledRef.current;
     attack.preload = "auto";
     hit.preload = "auto";
     audioRef.current.bgm = bgmTracks;
     audioRef.current.haoBgm = haoBgm;
+    audioRef.current.gameoverBgm = gameoverBgm;
     audioRef.current.attack = attack;
     audioRef.current.hit = hit;
     switchMusic("bgm1");
@@ -1778,10 +1833,11 @@ export default function GamePage() {
   }, []);
 
   const expPercent = useMemo(() => clamp((hud.exp / hud.nextExp) * 100, 0, 100), [hud.exp, hud.nextExp]);
+  const haoPercent = useMemo(() => clamp((hud.haoWill / hud.haoWillMax) * 100, 0, 100), [hud.haoWill, hud.haoWillMax]);
   const hpPercent = useMemo(() => clamp((hud.hp / hud.maxHp) * 100, 0, 100), [hud.hp, hud.maxHp]);
 
   return (
-    <main className="relative h-[100dvh] w-screen overflow-hidden bg-[#050712] font-mono text-white">
+    <main className="game-landscape-stage relative h-[100dvh] w-screen overflow-hidden bg-[#050712] font-mono text-white">
       <canvas ref={canvasRef} className="block h-full w-full touch-none" />
 
       <div className="pointer-events-none absolute left-1/2 top-[max(0.75rem,env(safe-area-inset-top))] z-10 hidden -translate-x-1/2 text-center sm:block">
@@ -1790,9 +1846,9 @@ export default function GamePage() {
         </h1>
       </div>
 
-      <section className="absolute left-0 top-0 w-full p-2 pt-[max(0.5rem,env(safe-area-inset-top))] sm:p-4">
-        <div className="grid gap-2 text-xs text-cyan-50 sm:grid-cols-[minmax(260px,520px)_auto] sm:items-start">
-          <div className="space-y-2 rounded border border-cyan-300/15 bg-slate-950/35 p-3 backdrop-blur-sm">
+      <section className="pointer-events-none absolute left-0 top-0 z-10 w-full p-2 pt-[max(0.5rem,env(safe-area-inset-top))] sm:p-4">
+        <div className="grid max-w-[min(620px,calc(100vw-1rem))] gap-2 text-[11px] text-cyan-50 sm:grid-cols-[minmax(260px,520px)_auto] sm:items-start">
+          <div className="space-y-1.5 border border-cyan-300/15 bg-slate-950/28 p-2 backdrop-blur-[2px] sm:p-3">
             <div className="flex items-center gap-3">
               <span className="min-w-16 text-cyan-200">等级 {hud.level}</span>
               <div className="h-3 flex-1 border border-cyan-300/50 bg-slate-950/70">
@@ -1800,6 +1856,15 @@ export default function GamePage() {
               </div>
               <span className="min-w-20 text-right text-cyan-100">
                 {hud.exp}/{hud.nextExp}
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="min-w-16 text-yellow-100">豪意</span>
+              <div className="h-2.5 flex-1 border border-yellow-200/45 bg-slate-950/60">
+                <div className="h-full bg-yellow-300 shadow-[0_0_14px_rgba(250,204,21,0.75)]" style={{ width: `${haoPercent}%` }} />
+              </div>
+              <span className="min-w-20 text-right text-yellow-100">
+                {hud.haoWill}/{hud.haoWillMax}
               </span>
             </div>
             <div className="flex items-center gap-3">
@@ -1811,7 +1876,7 @@ export default function GamePage() {
                 {hud.hp}/{hud.maxHp}
               </span>
             </div>
-            <div className="text-[11px] text-slate-400">
+            <div className="hidden text-[11px] text-slate-400 sm:block">
               <span className="[@media(pointer:fine)]:hidden">拖动下方摇杆移动，武器会自动攻击最近敌人</span>
               <span className="hidden [@media(pointer:fine)]:inline">WASD / 方向键移动，武器会自动攻击最近敌人</span>
             </div>
@@ -1820,7 +1885,7 @@ export default function GamePage() {
                 自在极意豪形态 {gameRef.current.player.haoModeTimer.toFixed(1)}s
               </div>
             )}
-            <div className="relative pointer-events-auto">
+            <div className="pointer-events-auto absolute right-2 top-[max(0.5rem,env(safe-area-inset-top))]">
               <button
                 type="button"
                 aria-label="设置"
@@ -1850,13 +1915,13 @@ export default function GamePage() {
                     onClick={restart}
                     className="mt-1 block w-full border border-transparent px-3 py-2 text-left text-rose-100 transition hover:border-rose-300/40 hover:bg-rose-300/10"
                   >
-                    重新开始
+                    三气归来！
                   </button>
                 </div>
               )}
             </div>
           </div>
-          <div className="grid w-fit grid-cols-2 gap-x-6 gap-y-1 rounded border border-cyan-300/20 bg-slate-950/55 p-3 text-right shadow-[0_0_24px_rgba(14,165,233,0.12)] backdrop-blur">
+          <div className="hidden w-fit grid-cols-2 gap-x-5 gap-y-1 border border-cyan-300/20 bg-slate-950/40 p-2 text-right shadow-[0_0_24px_rgba(14,165,233,0.12)] backdrop-blur sm:grid">
             <span className="text-slate-300">击杀</span>
             <span className="text-yellow-100">{hud.kills}</span>
             <span className="text-slate-300">存活</span>
@@ -1865,7 +1930,7 @@ export default function GamePage() {
         </div>
       </section>
 
-      <div className="absolute bottom-[max(1.25rem,env(safe-area-inset-bottom))] left-1/2 z-20 h-32 w-32 -translate-x-1/2 touch-none select-none landscape:left-[58%] landscape:h-36 landscape:w-36 [@media(pointer:fine)]:hidden">
+      <div className="absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] right-[max(0.75rem,env(safe-area-inset-right))] z-20 h-28 w-28 touch-none select-none landscape:h-32 landscape:w-32 [@media(pointer:fine)]:hidden">
         <div
           role="presentation"
           onPointerDown={(event) => {
@@ -1955,7 +2020,7 @@ export default function GamePage() {
               onClick={restart}
               className="mt-7 border border-cyan-300/60 bg-cyan-300/10 px-7 py-3 text-sm font-bold text-cyan-100 transition hover:bg-cyan-300/20 hover:shadow-[0_0_24px_rgba(34,211,238,0.24)]"
             >
-              重新开始
+              三气归来！
             </button>
           </section>
         </div>

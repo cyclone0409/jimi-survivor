@@ -25,3 +25,15 @@ body {
 button {
   font: inherit;
 }
+
+@media (orientation: portrait) and (pointer: coarse) {
+  .game-landscape-stage {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 100svh;
+    height: 100svw;
+    transform: rotate(90deg) translateY(-100%);
+    transform-origin: top left;
+  }
+}
