@@ -266,7 +266,7 @@ const initialHud: Hud = {
   exp: 0,
   nextExp: 7,
   haoWill: 0,
-  haoWillMax: 100,
+  haoWillMax: 120,
   hp: 120,
   maxHp: 120,
   kills: 0,
@@ -307,7 +307,7 @@ function createGame(width = 960, height = 540): Game {
       exp: 0,
       nextExp: 7,
       haoWill: 0,
-      haoWillMax: 100,
+      haoWillMax: 120,
       bulletSpeed: 620,
       bulletDamage: 16,
       fireCooldown: 0.43,
@@ -321,7 +321,7 @@ function createGame(width = 960, height = 540): Game {
       skillLevels: {},
       haoModeActive: false,
       haoModeTimer: 0,
-      haoModeDuration: 8,
+      haoModeDuration: 14,
       haoModeDamageMultiplier: 1.4,
       haoModeSpeedMultiplier: 1.15,
       haoModePickupMultiplier: 1.4,
@@ -637,10 +637,14 @@ export default function GamePage() {
   const switchMusic = useCallback((track: MusicTrack) => {
     const audio = audioRef.current;
     if (gameRef.current.phase === "gameover") return;
-    if (audio.currentTrack === track) return;
     if (audio.haoBgmActive) {
       audio.pausedTrack = track;
       return;
+    }
+    if (audio.gameoverBgm) {
+      audio.gameoverBgm.pause();
+      audio.gameoverBgm.currentTime = 0;
+      audio.gameoverBgm.volume = 0;
     }
     if (!musicEnabledRef.current) {
       audio.currentTrack = track;
@@ -654,6 +658,11 @@ export default function GamePage() {
     audio.fadeTimers = [];
 
     if (!next) return;
+    if (audio.currentTrack === track) {
+      next.volume = 0.42;
+      if (next.paused) next.play().catch(() => undefined);
+      return;
+    }
 
     next.volume = 0;
     audio.currentTrack = track;
@@ -691,17 +700,14 @@ export default function GamePage() {
         next.pause();
         next.currentTime = 0;
         next.volume = 0;
-        audio.currentTrack = previousTrack;
-        if (gameRef.current.phase === "gameover") return;
-        const index = MUSIC_ORDER.indexOf(track);
-        const fallbackTrack = MUSIC_ORDER[(index + 1) % MUSIC_ORDER.length] || "bgm1";
-        if (fallbackTrack !== track) window.setTimeout(() => switchMusic(fallbackTrack), 0);
+        audio.currentTrack = track;
+        if (previous && previousTrack !== track && !previous.paused) previous.volume = 0.42;
       });
   }, []);
 
   const startHaoMusic = useCallback(() => {
     const audio = audioRef.current;
-    if (!musicEnabledRef.current || !audio.haoBgm || audio.haoBgmActive) return;
+    if (gameRef.current.phase === "gameover" || !musicEnabledRef.current || !audio.haoBgm || audio.haoBgmActive) return;
     const currentTrack = audio.currentTrack;
     audio.pausedTrack = currentTrack;
     for (const timer of audio.fadeTimers) window.clearInterval(timer);
@@ -711,6 +717,11 @@ export default function GamePage() {
       track.pause();
       track.currentTime = 0;
       track.volume = 0;
+    }
+    if (audio.gameoverBgm) {
+      audio.gameoverBgm.pause();
+      audio.gameoverBgm.currentTime = 0;
+      audio.gameoverBgm.volume = 0;
     }
     audio.haoBgmActive = true;
     audio.haoBgm.volume = 0.48;
@@ -734,6 +745,7 @@ export default function GamePage() {
     haoBgm.pause();
     audio.haoBgmActive = false;
     if (!musicEnabledRef.current) return;
+    if (gameRef.current.phase === "gameover") return;
     const resumeTrack = audio.pausedTrack || audio.currentTrack || musicTrackForTier(gameRef.current.musicTier || 1);
     const resumeAudio = audio.bgm[resumeTrack];
     if (resumeAudio) {
@@ -774,6 +786,7 @@ export default function GamePage() {
     for (const track of Object.values(audio.bgm)) {
       if (!track) continue;
       track.pause();
+      track.currentTime = 0;
       track.volume = 0;
     }
     if (audio.haoBgm) {
@@ -795,6 +808,16 @@ export default function GamePage() {
     const trackKey = audio.currentTrack || "bgm1";
     const currentAudio = audio.bgm[trackKey];
     if (!currentAudio) return;
+    for (const [key, track] of Object.entries(audio.bgm) as [MusicTrack, HTMLAudioElement][]) {
+      if (key === trackKey) continue;
+      track.pause();
+      track.volume = 0;
+    }
+    if (audio.gameoverBgm) {
+      audio.gameoverBgm.pause();
+      audio.gameoverBgm.currentTime = 0;
+      audio.gameoverBgm.volume = 0;
+    }
     audio.currentTrack = trackKey;
     if (currentAudio.readyState === HTMLMediaElement.HAVE_NOTHING) currentAudio.load();
     currentAudio.volume = currentAudio.volume || 0.42;
@@ -936,7 +959,7 @@ export default function GamePage() {
     (game: Game, enemy: Enemy) => {
       const player = game.player;
       if (player.haoModeActive) return;
-      const gain = enemy.type === "tank" ? 18 : enemy.type === "shooter" ? 15 : enemy.type === "fast" ? 10 : 8;
+      const gain = enemy.type === "tank" ? 8 : enemy.type === "shooter" ? 7 : enemy.type === "fast" ? 5 : 4;
       player.haoWill = clamp(player.haoWill + gain, 0, player.haoWillMax);
       if (player.haoWill >= player.haoWillMax) activateHaoMode(game);
     },
@@ -1601,7 +1624,7 @@ export default function GamePage() {
       if (skill.key === "spreadBullet") player.spreadLevel += 1;
       if (skill.key === "splashBullet") player.splashLevel += 1;
       if (skill.key === "orbitBullet") player.orbitLevel += 1;
-      if (skill.key === "haoDuration") player.haoModeDuration += 2.5;
+      if (skill.key === "haoDuration") player.haoModeDuration += 4;
       if (skill.key === "haoDamage") player.haoModeDamageMultiplier += 0.18;
       if (skill.key === "haoShockwave") player.haoShockwaveLevel += 1;
       if (skill.key === "haoMusic") player.haoMusicLevel += 1;
@@ -1637,11 +1660,17 @@ export default function GamePage() {
       }
       if (audio.gameoverBgm) {
         audio.gameoverBgm.muted = !nextEnabled;
-        if (!nextEnabled) audio.gameoverBgm.pause();
+        if (!nextEnabled) {
+          audio.gameoverBgm.pause();
+          audio.gameoverBgm.volume = 0;
+        }
       }
       if (nextEnabled) {
         if (gameRef.current.phase === "gameover") {
-          audio.gameoverBgm?.play().catch(() => undefined);
+          if (audio.gameoverBgm) {
+            audio.gameoverBgm.volume = 0.5;
+            audio.gameoverBgm.play().catch(() => undefined);
+          }
           return nextEnabled;
         }
         if (audio.haoBgmActive) {
@@ -1735,9 +1764,9 @@ export default function GamePage() {
     audioRef.current.gameoverBgm = gameoverBgm;
     audioRef.current.attack = attack;
     audioRef.current.hit = hit;
-    switchMusic("bgm1");
+    audioRef.current.currentTrack = "bgm1";
     return stopMusic;
-  }, [stopMusic, switchMusic]);
+  }, [stopMusic]);
 
   useEffect(() => {
     const entries = Object.entries(SPRITE_SOURCES) as [SpriteKey, string][];
