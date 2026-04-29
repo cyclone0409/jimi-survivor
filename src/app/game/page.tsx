@@ -591,12 +591,14 @@ export default function GamePage() {
   const audioRef = useRef<AudioState>({ bgm: {}, haoBgmTime: 0, haoBgmActive: false, fadeTimers: [] });
   const musicEnabledRef = useRef(true);
   const sfxEnabledRef = useRef(true);
+  const gameStartedRef = useRef(false);
   const rafRef = useRef<number | null>(null);
   const lastRef = useRef<number>(0);
   const [hud, setHud] = useState<Hud>(initialHud);
   const [choices, setChoices] = useState<Skill[]>([]);
   const [selectedChoice, setSelectedChoice] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [gameStarted, setGameStarted] = useState(false);
   const [musicEnabled, setMusicEnabled] = useState(true);
   const [sfxEnabled, setSfxEnabled] = useState(true);
   const [joystickActive, setJoystickActive] = useState(false);
@@ -804,7 +806,7 @@ export default function GamePage() {
 
   const unlockMusic = useCallback(() => {
     const audio = audioRef.current;
-    if (!musicEnabledRef.current || audio.haoBgmActive || gameRef.current.phase === "gameover") return;
+    if (!gameStartedRef.current || !musicEnabledRef.current || audio.haoBgmActive || gameRef.current.phase === "gameover") return;
     const trackKey = audio.currentTrack || "bgm1";
     const currentAudio = audio.bgm[trackKey];
     if (!currentAudio) return;
@@ -823,6 +825,14 @@ export default function GamePage() {
     currentAudio.volume = currentAudio.volume || 0.42;
     currentAudio.play().catch(() => undefined);
   }, []);
+
+  const startGameWithMusic = useCallback(() => {
+    gameStartedRef.current = true;
+    setGameStarted(true);
+    lastRef.current = performance.now();
+    if (!audioRef.current.currentTrack) audioRef.current.currentTrack = "bgm1";
+    unlockMusic();
+  }, [unlockMusic]);
 
   const playAttackSound = useCallback(() => {
     if (!sfxEnabledRef.current) return;
@@ -870,6 +880,8 @@ export default function GamePage() {
     setChoices([]);
     setSelectedChoice(0);
     setSettingsOpen(false);
+    gameStartedRef.current = true;
+    setGameStarted(true);
     settingsPausedRef.current = false;
     stopHaoMusic();
     switchMusic("bgm1");
@@ -1063,6 +1075,7 @@ export default function GamePage() {
   const updateGame = useCallback(
     (dt: number) => {
       const game = gameRef.current;
+      if (!gameStartedRef.current) return;
       if (game.phase !== "playing") return;
       const player = game.player;
       game.time += dt;
@@ -1790,6 +1803,11 @@ export default function GamePage() {
     window.addEventListener("resize", resizeCanvas);
     const down = (event: KeyboardEvent) => {
       const game = gameRef.current;
+      if (!gameStartedRef.current && (event.code === "Space" || event.code === "Enter")) {
+        event.preventDefault();
+        startGameWithMusic();
+        return;
+      }
       unlockMusic();
       if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "Enter", "Escape"].includes(event.code)) event.preventDefault();
       if (event.code === "Escape" && (game.phase === "playing" || game.phase === "paused")) {
@@ -1833,7 +1851,7 @@ export default function GamePage() {
       window.removeEventListener("touchend", unlockByPointer);
       window.removeEventListener("click", unlockByPointer);
     };
-  }, [choices, chooseSkill, resizeCanvas, selectedChoice, togglePause, unlockMusic]);
+  }, [choices, chooseSkill, resizeCanvas, selectedChoice, startGameWithMusic, togglePause, unlockMusic]);
 
   useEffect(() => {
     const loop = (now: number) => {
@@ -1881,6 +1899,21 @@ export default function GamePage() {
   return (
     <main className="game-landscape-stage relative h-[100dvh] w-screen overflow-hidden bg-[#050712] font-mono text-white">
       <canvas ref={canvasRef} className="block h-full w-full touch-none" />
+
+      {!gameStarted && hud.phase !== "gameover" && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center bg-slate-950/72 p-5 backdrop-blur-sm">
+          <section className="max-w-md border border-cyan-300/50 bg-slate-950/85 p-5 text-center shadow-[0_0_42px_rgba(34,211,238,0.22)]">
+            <h1 className="text-2xl font-bold tracking-[0.12em] text-cyan-100">基米幸存者</h1>
+            <button
+              type="button"
+              onClick={startGameWithMusic}
+              className="mt-6 border border-yellow-200/70 bg-yellow-200/10 px-6 py-3 text-sm font-bold text-yellow-100 shadow-[0_0_24px_rgba(250,204,21,0.18)] transition hover:bg-yellow-200/20"
+            >
+              欣赏美妙音乐并开始游戏
+            </button>
+          </section>
+        </div>
+      )}
 
       <div className="pointer-events-none absolute left-1/2 top-[max(0.75rem,env(safe-area-inset-top))] z-10 hidden -translate-x-1/2 text-center sm:block">
         <h1 className="text-lg font-bold tracking-[0.18em] text-cyan-100 drop-shadow-[0_0_12px_rgba(34,211,238,0.65)] sm:text-2xl">
