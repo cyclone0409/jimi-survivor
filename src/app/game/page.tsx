@@ -571,6 +571,7 @@ export default function GamePage() {
   const gameRef = useRef<Game>(createGame());
   const keysRef = useRef<Set<string>>(new Set());
   const joystickRef = useRef<Vec>({ x: 0, y: 0 });
+  const settingsPausedRef = useRef(false);
   const spritesRef = useRef<Partial<Record<SpriteKey, SpriteAsset>>>({});
   const audioRef = useRef<AudioState>({ bgm: {}, haoBgmTime: 0, haoBgmActive: false, fadeTimers: [] });
   const musicEnabledRef = useRef(true);
@@ -637,6 +638,7 @@ export default function GamePage() {
     if (!next) return;
 
     next.volume = 0;
+    audio.currentTrack = track;
     const fadeToNext = () => {
       audio.currentTrack = track;
 
@@ -668,6 +670,8 @@ export default function GamePage() {
       .play()
       .then(fadeToNext)
       .catch(() => {
+        audio.currentTrack = track;
+        next.volume = 0.42;
         if (previous) {
           previous.currentTime = 0;
           previous.volume = 0.42;
@@ -739,6 +743,17 @@ export default function GamePage() {
     audio.currentTrack = undefined;
   }, []);
 
+  const unlockMusic = useCallback(() => {
+    const audio = audioRef.current;
+    if (!musicEnabledRef.current || audio.haoBgmActive) return;
+    const trackKey = audio.currentTrack || "bgm1";
+    const currentAudio = audio.bgm[trackKey];
+    if (!currentAudio) return;
+    audio.currentTrack = trackKey;
+    currentAudio.volume = currentAudio.volume || 0.42;
+    currentAudio.play().catch(() => undefined);
+  }, []);
+
   const playAttackSound = useCallback(() => {
     if (!sfxEnabledRef.current) return;
     const attack = audioRef.current.attack;
@@ -785,6 +800,7 @@ export default function GamePage() {
     setChoices([]);
     setSelectedChoice(0);
     setSettingsOpen(false);
+    settingsPausedRef.current = false;
     stopHaoMusic();
     switchMusic("bgm1");
     syncHud();
@@ -1604,6 +1620,28 @@ export default function GamePage() {
     }
   }, [syncHud]);
 
+  const toggleSettings = useCallback(() => {
+    setSettingsOpen((open) => {
+      const nextOpen = !open;
+      const game = gameRef.current;
+      if (nextOpen) {
+        settingsPausedRef.current = game.phase === "playing";
+        if (game.phase === "playing") {
+          game.phase = "paused";
+          syncHud();
+        }
+      } else if (settingsPausedRef.current && game.phase === "paused") {
+        game.phase = "playing";
+        lastRef.current = performance.now();
+        settingsPausedRef.current = false;
+        syncHud();
+      } else {
+        settingsPausedRef.current = false;
+      }
+      return nextOpen;
+    });
+  }, [syncHud]);
+
   useEffect(() => {
     const bgmTracks = Object.fromEntries(
       MUSIC_ORDER.map((track) => [track, createAudioWithFallback(AUDIO_SOURCES[track])])
@@ -1659,9 +1697,7 @@ export default function GamePage() {
     window.addEventListener("resize", resizeCanvas);
     const down = (event: KeyboardEvent) => {
       const game = gameRef.current;
-      const currentTrack = audioRef.current.currentTrack;
-      const currentAudio = currentTrack ? audioRef.current.bgm[currentTrack] : undefined;
-      if (currentAudio?.paused) currentAudio.play().catch(() => undefined);
+      unlockMusic();
       if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "Enter", "Escape"].includes(event.code)) event.preventDefault();
       if (event.code === "Escape" && (game.phase === "playing" || game.phase === "paused")) {
         togglePause();
@@ -1688,14 +1724,19 @@ export default function GamePage() {
       keysRef.current.add(event.code);
     };
     const up = (event: KeyboardEvent) => keysRef.current.delete(event.code);
+    const unlockByPointer = () => unlockMusic();
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
+    window.addEventListener("pointerdown", unlockByPointer);
+    window.addEventListener("touchstart", unlockByPointer, { passive: true });
     return () => {
       window.removeEventListener("resize", resizeCanvas);
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
+      window.removeEventListener("pointerdown", unlockByPointer);
+      window.removeEventListener("touchstart", unlockByPointer);
     };
-  }, [choices, chooseSkill, resizeCanvas, selectedChoice, togglePause]);
+  }, [choices, chooseSkill, resizeCanvas, selectedChoice, togglePause, unlockMusic]);
 
   useEffect(() => {
     const loop = (now: number) => {
@@ -1743,57 +1784,14 @@ export default function GamePage() {
     <main className="relative h-[100dvh] w-screen overflow-hidden bg-[#050712] font-mono text-white">
       <canvas ref={canvasRef} className="block h-full w-full touch-none" />
 
-      <div className="pointer-events-none absolute left-1/2 top-3 z-10 -translate-x-1/2 text-center sm:top-4">
+      <div className="pointer-events-none absolute left-1/2 top-[max(0.75rem,env(safe-area-inset-top))] z-10 hidden -translate-x-1/2 text-center sm:block">
         <h1 className="text-lg font-bold tracking-[0.18em] text-cyan-100 drop-shadow-[0_0_12px_rgba(34,211,238,0.65)] sm:text-2xl">
           基米幸存者
         </h1>
       </div>
 
-      <div className="absolute right-3 top-3 z-20 flex items-start gap-2 sm:right-4 sm:top-4">
-        <button
-          type="button"
-          onClick={togglePause}
-          className="h-10 border border-cyan-300/40 bg-slate-950/70 px-3 text-sm font-bold text-cyan-100 shadow-[0_0_20px_rgba(34,211,238,0.18)] backdrop-blur transition hover:border-yellow-200 hover:text-yellow-100"
-        >
-          {hud.phase === "paused" ? "继续" : "暂停"}
-        </button>
-        <button
-          type="button"
-          aria-label="设置"
-          onClick={() => setSettingsOpen((open) => !open)}
-          className="grid h-10 w-10 place-items-center rounded border border-cyan-300/40 bg-slate-950/70 text-lg text-cyan-100 shadow-[0_0_20px_rgba(34,211,238,0.18)] backdrop-blur transition hover:border-yellow-200 hover:text-yellow-100"
-        >
-          ⚙
-        </button>
-        {settingsOpen && (
-          <div className="absolute right-0 top-12 w-52 border border-cyan-300/35 bg-slate-950/85 p-2 text-sm text-cyan-50 shadow-[0_0_30px_rgba(14,165,233,0.2)] backdrop-blur">
-            <button
-              type="button"
-              onClick={toggleMusic}
-              className="block w-full border border-transparent px-3 py-2 text-left transition hover:border-cyan-300/40 hover:bg-cyan-300/10"
-            >
-              {musicEnabled ? "关闭美妙音乐" : "开启美妙音乐"}
-            </button>
-            <button
-              type="button"
-              onClick={toggleSfx}
-              className="mt-1 block w-full border border-transparent px-3 py-2 text-left transition hover:border-cyan-300/40 hover:bg-cyan-300/10"
-            >
-              {sfxEnabled ? "关闭私人音效" : "开启私人音效"}
-            </button>
-            <button
-              type="button"
-              onClick={restart}
-              className="mt-1 block w-full border border-transparent px-3 py-2 text-left text-rose-100 transition hover:border-rose-300/40 hover:bg-rose-300/10"
-            >
-              重新开始
-            </button>
-          </div>
-        )}
-      </div>
-
-      <section className="pointer-events-none absolute left-0 top-0 w-full p-3 sm:p-4">
-        <div className="grid gap-3 text-xs text-cyan-50 sm:grid-cols-[minmax(260px,520px)_auto] sm:items-start">
+      <section className="absolute left-0 top-0 w-full p-2 pt-[max(0.5rem,env(safe-area-inset-top))] sm:p-4">
+        <div className="grid gap-2 text-xs text-cyan-50 sm:grid-cols-[minmax(260px,520px)_auto] sm:items-start">
           <div className="space-y-2 rounded border border-cyan-300/15 bg-slate-950/35 p-3 backdrop-blur-sm">
             <div className="flex items-center gap-3">
               <span className="min-w-16 text-cyan-200">等级 {hud.level}</span>
@@ -1813,12 +1811,50 @@ export default function GamePage() {
                 {hud.hp}/{hud.maxHp}
               </span>
             </div>
-            <div className="text-[11px] text-slate-400">WASD / 方向键移动，武器会自动攻击最近敌人</div>
+            <div className="text-[11px] text-slate-400">
+              <span className="[@media(pointer:fine)]:hidden">拖动下方摇杆移动，武器会自动攻击最近敌人</span>
+              <span className="hidden [@media(pointer:fine)]:inline">WASD / 方向键移动，武器会自动攻击最近敌人</span>
+            </div>
             {gameRef.current.player.haoModeActive && (
               <div className="text-[11px] font-bold text-yellow-100">
                 自在极意豪形态 {gameRef.current.player.haoModeTimer.toFixed(1)}s
               </div>
             )}
+            <div className="relative pointer-events-auto">
+              <button
+                type="button"
+                aria-label="设置"
+                onClick={toggleSettings}
+                className="grid h-10 w-10 place-items-center border border-cyan-300/40 bg-slate-950/70 text-lg text-cyan-100 shadow-[0_0_20px_rgba(34,211,238,0.18)] backdrop-blur transition hover:border-yellow-200 hover:text-yellow-100"
+              >
+                ⚙
+              </button>
+              {settingsOpen && (
+                <div className="absolute left-0 top-12 z-30 w-52 border border-cyan-300/35 bg-slate-950/90 p-2 text-sm text-cyan-50 shadow-[0_0_30px_rgba(14,165,233,0.2)] backdrop-blur">
+                  <button
+                    type="button"
+                    onClick={toggleMusic}
+                    className="block w-full border border-transparent px-3 py-2 text-left transition hover:border-cyan-300/40 hover:bg-cyan-300/10"
+                  >
+                    {musicEnabled ? "关闭美妙音乐" : "开启美妙音乐"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleSfx}
+                    className="mt-1 block w-full border border-transparent px-3 py-2 text-left transition hover:border-cyan-300/40 hover:bg-cyan-300/10"
+                  >
+                    {sfxEnabled ? "关闭私人音效" : "开启私人音效"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={restart}
+                    className="mt-1 block w-full border border-transparent px-3 py-2 text-left text-rose-100 transition hover:border-rose-300/40 hover:bg-rose-300/10"
+                  >
+                    重新开始
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
           <div className="grid w-fit grid-cols-2 gap-x-6 gap-y-1 rounded border border-cyan-300/20 bg-slate-950/55 p-3 text-right shadow-[0_0_24px_rgba(14,165,233,0.12)] backdrop-blur">
             <span className="text-slate-300">击杀</span>
@@ -1829,7 +1865,7 @@ export default function GamePage() {
         </div>
       </section>
 
-      <div className="absolute bottom-5 left-5 z-20 h-32 w-32 touch-none select-none sm:bottom-7 sm:left-7 landscape:h-36 landscape:w-36 [@media(pointer:fine)]:hidden">
+      <div className="absolute bottom-[max(1.25rem,env(safe-area-inset-bottom))] left-1/2 z-20 h-32 w-32 -translate-x-1/2 touch-none select-none landscape:left-[58%] landscape:h-36 landscape:w-36 [@media(pointer:fine)]:hidden">
         <div
           role="presentation"
           onPointerDown={(event) => {
